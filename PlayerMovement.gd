@@ -2,6 +2,7 @@ extends CharacterBody2D
 class_name Player
 
 @onready var camera = $Camera2D as Camera2D
+@onready var springjump_particles = $"springjump particles"
 
 const SPEED = 3000.0
 
@@ -28,6 +29,7 @@ var just_jumped := false
 var just_jumped_timer := 0.0
 var coyote_timer := 0.0
 var jump_buffer := 0.0
+var walljump_timer := 0.0
 
 var current_direction := 0.0
 var current_max_speed := 0.0
@@ -77,13 +79,20 @@ func _ready():
 func _jump(direction : float, no_just_jump : bool):
 	jump_buffer = 0.0
 	coyote_timer = 0.0
+	walljump_timer = 0.1
 	
 	if (isTall && canBoost):
-		var additional_boost = clampf(current_max_speed / JUMP_VELOCITY_MULTIPLIER_BY_SPEED, 1.0, 1.25)
+		var additional_boost = 1.20 if current_max_speed >= JUMP_VELOCITY_MULTIPLIER_BY_SPEED else 1.0
 		velocity.y = BOOSTED_JUMP_VELOCITY * additional_boost
 		canBoost = false
 		just_jumped = false
-		sl.play_one_shot_2D("jump", "PLAYER")
+		
+		if (additional_boost != 1.0):
+			springjump_particles.emitting = true
+			sl.play_one_shot_2D("jump", "PLAYER")
+			sl.play_one_shot_2D("boostjump", "PLAYER")
+		else:
+			sl.play_one_shot_2D("jump", "PLAYER")
 		return
 	
 	if (!isTall && canBoost && complex_enabled && !is_climbing_wall || !isTall && canBoost && wall_complex_enabled && is_climbing_wall):
@@ -156,6 +165,7 @@ func _process(delta):
 	coyote_timer -= delta
 	jump_buffer -= delta
 	just_jumped_timer -= delta
+	walljump_timer -= delta
 	
 	if (just_jumped_timer < 0.0):
 		just_jumped = false
@@ -168,7 +178,7 @@ func _process(delta):
 	var direction = Input.get_axis("left", "right")
 	
 	# handle wall climbing
-	if (is_on_wall_only() && wall_enabled):
+	if (is_on_wall_only() && wall_enabled && walljump_timer <= 0.0):
 		is_climbing_wall = true
 	elif (is_climbing_wall):
 		is_climbing_wall = false
@@ -179,10 +189,14 @@ func _process(delta):
 	
 	# handle jumping
 	if (jump_buffer > 0.0 && jump_enabled):
-		if (coyote_timer > 0.0):
-			_jump(direction, false)
-		elif (is_climbing_wall && !isTall):
+		if (is_climbing_wall && !isTall):
+			# fix walljump bug, last wall normal gets out of sync sometimes and causes a no-jump
+			if (get_wall_normal().x != 0.0):
+				last_wall_normal_x = get_wall_normal().x
+				
 			_jump(last_wall_normal_x, false)
+		elif (coyote_timer > 0.0):
+			_jump(direction, false)
 	
 	# handle switching between states
 	if (Input.is_action_just_pressed("switch") && can_switch):
